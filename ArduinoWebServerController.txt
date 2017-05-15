@@ -1,0 +1,188 @@
+/*
+  Web Server
+
+  A simple web server that can control relays.
+  using an Arduino Wiznet Ethernet shield.
+
+  Circuit:
+   Ethernet shield attached to pins 10, 11, 12, 13
+   Relays attached to digital pins 5 and 6
+
+  created April 2016
+  by Marc L. Geffroy
+  modified May 2016
+*/
+
+#include <SPI.h>
+#include <EthernetV2_0.h>
+#include <SD.h>
+
+#define ReqdBufrSize  27      // size of buffer used to capture HTTP requests
+#define Relay1        5       // Pin used to control Relay 1
+#define Relay2        6       // Pin used to control Relay 2
+
+// Enter a MAC address and IP address for your controller below.
+// The IP address will be dependent on your local network:
+byte mac[] = {
+  0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED
+};
+byte gateway[] = {192, 168, 0, 1};
+byte subnet[] = {255, 255, 255, 0};
+IPAddress ip(192, 168, 0, 177);
+EthernetServer server(80);  //create a server at port 80
+//port 8081 if accessed from outside the LAN
+File webFile;
+
+char httpRequest [ReqdBufrSize] = {0};
+String fileLine;
+char reqIndex = 0;
+int count = 0;
+boolean relayOne = false;     //A check to see if relay 1 is on
+boolean relayTwo = false;     //A check to see if relay 2 is on
+
+void setup() {
+  pinMode(Relay1, OUTPUT);
+  pinMode(Relay2, OUTPUT);
+
+  Ethernet.begin(mac, ip, gateway, subnet);       // initialize Ethernet device
+  server.begin();                                 // start to listen for clients
+
+  //Iniitialize SD card
+  Serial.println("Initializing SD card...");
+  if (!SD.begin(4) ) {
+    return;     //init failed
+  }
+  //check for MainPage.html file
+  if (!SD.exists("index.txt") ) {
+    return;
+  }
+}
+
+
+void loop() {
+  EthernetClient client = server.available();  // try to get client
+
+  if (client) { // got client?
+    boolean currentLineIsBlank = true;
+    while (client.connected() ) {
+      if (client.available() ) {  // client data available to read
+        char c = client.read(); // read 1 byte (character) from client
+
+        if (reqIndex < (ReqdBufrSize - 1) ) {      // buffer first part of HTTP request in HTTP_req array (string)
+          // leave last element in array as 0 to null terminate string (REQ_BUF_SZ - 1)
+          httpRequest [reqIndex] = c;            // save HTTP request character
+          reqIndex++;
+        }
+
+        // last line of client request is blank and ends with \n
+        // respond to client only after last line received
+        if (c == '\n' && currentLineIsBlank) {
+          client.println("HTTP/1.1 200 OK");
+          client.println("Content-Type: text/html");
+          client.println("Connection: close");
+          client.println();
+
+          WriteFullHtmlPage(client);
+          break;
+        }
+        // every line of text received from the client ends with \r\n
+        if (c == '\n') {
+          // last character on line of received text
+          // starting new line with next character read
+          currentLineIsBlank = true;
+        }
+        else if (c != '\r') {
+          // a text character was received from client
+          currentLineIsBlank = false;
+        }
+      } // end if (client.available())
+    } // end while (client.connected())
+    delay(1);      // give the web browser time to receive the data
+    client.stop(); // close the connection
+  } // end if (client)
+}//End loop()
+
+
+void StrClear (char *str, char length) {
+  for (int i = 0; i < length; i++) {
+    str[i] = 0;
+  }
+}
+
+
+char StrContains (char *MyStr, char *FindStr) {
+  char len;
+  char found = 0;
+  char index = 0;
+
+  len = strlen (MyStr);
+
+  if ( strlen (FindStr ) > len) {
+    return 0;                 // will not find it (word longer than paragraph)
+  }
+  while (index < len) {
+    if (MyStr [index] == FindStr [found] ) {
+      found++;
+      if (strlen (FindStr) == found) { // if it's found
+        return 1;                        // leave and say found it
+      }
+    }
+    else {                                   // did not find it (yet)
+      found = 0;                           // keep looking
+    }
+    index++;                                 // keep looking
+  }
+  return 0;                                    // did not find it
+}
+
+
+void WriteFullHtmlPage(EthernetClient c1) {
+  //Check whether the browser is requesting Relay1 be turn ON
+  if (StrContains(httpRequest, "GET /?Relay1ON=Relay1ON")) {
+    digitalWrite(Relay1, HIGH);   //turn on the relay
+    relayOne = true;              //Set the relay value
+  }
+  //Check whether the browser is requesting Relay1 be turn OFF
+  else if (StrContains(httpRequest, "GET /?Relay1OFF=Relay1OFF")) {
+    digitalWrite(Relay1, LOW);    //turn off the relay
+    relayOne = false;             //Set the relay value
+  }
+  //Check whether the browser is requesting Relay2 be turn ON
+  else if (StrContains(httpRequest, "GET /?Relay2ON=Relay2ON")) {
+    digitalWrite(Relay2, HIGH);   //turn on the relay
+    relayTwo = true;              //Set the relay value
+  }
+  //Check whether the browser is requesting Relay2 be turn OFF
+  else if (StrContains(httpRequest, "GET /?Relay2OFF=Relay2OFF")) {
+    digitalWrite(Relay2, LOW);    //turn off the relay
+    relayTwo = false;             //Set the relay value
+  }
+  
+  webFile = SD.open("index.txt");
+  if (webFile) {
+    while (webFile.available() ) {
+      if (relayOne & count == 19) {     //At relay1 status line?
+        fileLine = "<p>Relay 1 Status: ON</p>"; //change the default line to this
+        webFile.readStringUntil('\n');
+      }
+      
+      else if (relayTwo & count == 25) { //At relay2 status line?
+        fileLine = "<p>Relay 2 Status: ON</p>"; //change the default line to this
+        webFile.readStringUntil('\n');
+      }
+      
+      else {
+        fileLine = webFile.readStringUntil('\n');
+      }
+      
+      c1.println( fileLine );           //Send fileLine to the client
+      count++;
+    }//End while(webFile.available())
+    webFile.close();
+  }//End if(webFile)
+  
+  count = 0;
+  reqIndex = 0;                            // reset buffer index
+  StrClear ( httpRequest, ReqdBufrSize );   // empty buffer request string by setting to 0
+}
+

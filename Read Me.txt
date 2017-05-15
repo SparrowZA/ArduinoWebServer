@@ -1,0 +1,6 @@
+Author: Marc Geffroy
+Date: 5/2016
+Title: Arduino Webserver Controller
+
+In this project an Arduino Uno coupled with a Arduino Ethernet shield was utilised to host a basic website.
+The user was able to switch an array of relays on and off via the website. 
